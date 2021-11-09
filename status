@@ -1,0 +1,45 @@
+#!/bin/bash
+#
+# with no argument, print a status of all jobs:
+# each line will be job ID, (Pending, Running, Finished), and the command
+#
+# with an argument, print the log for the job with that id
+
+OUTPUT_LOCATION=~/output/
+JOB_LIST=${OUTPUT_LOCATION}/job_list
+
+is_int () { 
+    test "$@" -eq "$@" 2> /dev/null;
+}
+
+job_status() {
+    # job ID is the argument
+    if [ -f "${OUTPUT_LOCATION}/${1}_finished" ]; then
+      echo "finished"
+    elif [ -f "${OUTPUT_LOCATION}/${1}_out" ]; then
+      echo "running"
+    else
+      echo "pending"
+    fi
+}
+
+# print the log for the specified job
+if [ $# -gt 0 ]; then
+    if ! is_int "${1}"; then
+        echo "ERROR: job id must be an integer" >&2
+        exit 1
+    fi
+    if [[ $(job_status $1) == "pending" ]]; then
+        echo "Job logs not available for $1" >&2
+        exit 0
+    fi
+    cat "${OUTPUT_LOCATION}/${1}_out"
+    exit 0
+else
+# otherwise print a table of the jobs
+job_id=0
+while IFS= read -r line; do
+  printf '%s\t%s\t%s\n' "$job_id" "$(job_status $job_id)" "${line}"
+  job_id=$( expr $job_id + 1 )
+done < "${JOB_LIST}"
+fi

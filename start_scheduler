@@ -1,0 +1,84 @@
+#!/bin/bash
+#
+# create a pipe and start the scheduler
+
+OUTPUT_LOCATION=~/output
+SCHEDULER_QUEUE=${OUTPUT_LOCATION}/scheduler_queue
+JOB_LIST=${OUTPUT_LOCATION}/job_list
+
+PROCESSES=2
+
+while [[ $# -gt 0 ]]; do
+  key="$1"
+
+  case $key in
+    -n|--processes)
+      PROCESSES="$2"
+      shift; shift
+    ;;
+    --queue-pending)
+      echo "requeue pending jobs"
+      REQUEUE_PENDING="True"
+      shift;
+    ;;
+    --queue-running)
+      echo "requeue running jobs"
+      REQUEUE_RUNNING="True"
+      shift;
+    ;;
+    *)    # unknown option
+      POSITIONAL+=("$1") # save it in an array for later
+      shift # past argument
+      ;;
+  esac
+done
+
+# lock the job list.  This is done because when we do requeue
+# we need to make sure a job is not submitted before requeue
+# takes place.
+touch "${JOB_LIST}"
+
+# get a lock so only one command will be submitted at a time
+# exec 200>>$JOB_LIST
+# flock 200
+
+if ! [[ -p "${SCHEDULER_QUEUE}" ]]; then
+  printf "Creating queue ${SCHEDULER_QUEUE}"
+  mkfifo ${SCHEDULER_QUEUE}
+fi
+
+# use disown
+echo "Starting scheduler"
+./scheduler.sh -n ${PROCESSES} -q ${SCHEDULER_QUEUE} &
+#disown $!
+
+# do requeue.
+# This takes one of the job IDS and checks its status.
+# The job will requeue if it is suppoed to requeue
+queue_if_needed() {
+    # job ID is the argument
+    if [ -f "${OUTPUT_LOCATION}/${1}_finished" ]; then
+      echo "Job ${1} has already finished"
+    elif [ -f "${OUTPUT_LOCATION}/${1}_out" ]; then
+        if [ "${REQUEUE_RUNNING}" = "True" ]; then
+            echo "${OUTPUT_LOCATION}/${1}_script.sh" > ${SCHEDULER_QUEUE}
+            echo "requeued ${1}"
+        fi
+    else
+        if [ "${REQUEUE_PENDING}" = "True" ]; then
+            echo "${OUTPUT_LOCATION}/${1}_script.sh" > ${SCHEDULER_QUEUE}
+            echo "requeued ${1}"
+        fi
+    fi
+}
+
+# look at each job in the job list.  Requeue if needed.
+job_id=0
+while IFS= read -r line; do
+  status="$(queue_if_needed ${job_id})"
+  if ! [ -z "${status}" ]; then
+    echo ${status}
+  fi
+  job_id=$( expr $job_id + 1 )
+done < "${JOB_LIST}"
+

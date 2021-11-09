@@ -1,0 +1,24 @@
+#!/bin/bash
+#
+
+PROCESSES=1
+while [[ $# -gt 0 ]]; do
+  key="$1"
+
+  case $key in
+    -q|--queue)
+      QUEUE="$2"
+      shift; shift
+    ;;
+    -n|--processes)
+      PROCESSES="$2"
+      shift; shift
+    ;;
+    *)    # unknown option
+      POSITIONAL+=("$1") # save it in an array for later
+      shift # past argument
+      ;;
+  esac
+done
+
+tail -n +0 -f $QUEUE | xargs -I {} -n 1 -P ${PROCESSES} env {}

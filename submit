@@ -1,0 +1,46 @@
+#!/bin/bash
+
+OUTPUT_LOCATION=~/output
+SCHEDULER_QUEUE=${OUTPUT_LOCATION}/scheduler_queue
+#SCHEDULER_QUEUE="/tmp/scheduler_queue"
+
+JOB_LIST=${OUTPUT_LOCATION}/job_list
+touch ${JOB_LIST}
+
+# get a lock so only one command will be submitted at a time
+exec 200>>$JOB_LIST
+flock 200
+
+# create a script to run the command
+JOB_ID=$(wc -l $JOB_LIST | awk '{print $1}')
+
+SCRIPT_FILE=${OUTPUT_LOCATION}/${JOB_ID}"_script.sh" 
+
+echo "#!/bin/bash" > ${SCRIPT_FILE}
+# start the command, and make sure we set the current working directory
+echo "env --chdir=`pwd` \\" >> ${SCRIPT_FILE}
+# preserve all enviornment variables
+env | awk 'BEGIN { FS="="; OFS="=" } {print $1,"\x27"$2"\x27" " \\"}' >> ${SCRIPT_FILE}
+
+echo "$@" " \\" >> ${SCRIPT_FILE}
+# redirect input from /dev/null (the application should not take input)
+# output redirected to a single file.  To split std and err, modify this line
+echo "</dev/null &>"${OUTPUT_LOCATION}/${JOB_ID}"_out" >> ${SCRIPT_FILE}
+
+# after the job has finished, write the return value to a "finished" file, so we know it is done running.
+echo 'printf $? > '${OUTPUT_LOCATION}/${JOB_ID}"_finished" >> ${SCRIPT_FILE}
+
+# make the script executable
+chmod u+x ${SCRIPT_FILE}
+
+# log in our history file that we started this job
+echo "$@" >> ${JOB_LIST}
+
+# put the job on the queue
+# use timeout, so it can be placed on the job list without queueing.
+# with timeout, the job script is written.  It might not be able to
+# queue because the scheduler is not running, and jobs are being added to
+# the job list to be queued when the scheduler starts.
+timeout 5s -k 10s echo ${SCRIPT_FILE} > ${SCHEDULER_QUEUE}
+
+echo ${JOB_ID}
